@@ -1,0 +1,364 @@
+/* Styles de base et personnalisés pour Micro Gestion Facile */
+
+body {
+  font-family: 'Inter', sans-serif;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+/* Transitions globales de couleurs pour le confort */
+*, *::before, *::after {
+  transition-property: background-color, border-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Désactivation des transitions pour les imports de fichiers, les chargements ou d'autres animations explicites */
+.no-transition, .no-transition * {
+  transition: none !important;
+}
+
+/* --- OVERRIDES ET INTEGRATION MODE SOMBRE INTUITIF --- */
+
+/* Scrollbars personnalisés en mode sombre */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #030712 !important;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #1e293b !important;
+  border-radius: 9999px !important;
+  border: 2px solid #030712 !important;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #334155 !important;
+}
+
+.dark body {
+  background-color: #030712 !important; /* bg-slate-950 */
+  color: #f8fafc !important; /* text-slate-50 */
+}
+
+/* Cards et conteneurs blancs */
+.dark .bg-white {
+  background-color: #090d16 !important; /* Deep night card background */
+  color: #f1f5f9 !important;
+  border-color: #1a2236 !important; /* Subtly dark border */
+}
+
+/* Survol des cartes interactives */
+.dark .bg-white:hover {
+  border-color: #2e3c5a !important;
+}
+
+/* Textes de nuances sombres */
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700 {
+  color: #f8fafc !important;
+}
+
+.dark .text-slate-600,
+.dark .text-slate-500 {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+/* Éléments de structure gris clairs par défaut */
+.dark .bg-slate-50 {
+  background-color: #0e1424 !important; /* Dark container background */
+  color: #f1f5f9 !important;
+}
+
+.dark .bg-slate-55,
+.dark .bg-slate-50\/20,
+.dark .bg-slate-55\/40,
+.dark .bg-slate-50\/25,
+.dark .bg-slate-50\/75,
+.dark .bg-slate-50\/50,
+.dark .bg-slate-50\/80,
+.dark .bg-slate-50\/90 {
+  background-color: rgba(14, 20, 36, 0.45) !important;
+}
+
+.dark .bg-slate-100 {
+  background-color: #1a2236 !important;
+}
+
+.dark .bg-slate-100\/80 {
+  background-color: rgba(26, 34, 54, 0.6) !important;
+}
+
+.dark .bg-slate-200 {
+  background-color: #27314a !important;
+}
+
+/* Bordures par défaut */
+.dark .border-slate-50,
+.dark .border-slate-100,
+.dark .border-slate-150,
+.dark .border-slate-150\/50,
+.dark .border-slate-200,
+.dark .border-slate-200\/50,
+.dark .border-slate-200\/60,
+.dark .border-slate-200\/80,
+.dark .border-slate-300 {
+  border-color: #1a2236 !important;
+}
+
+/* Hover de listes et de lignes de table */
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-slate-50\/50:hover,
+.dark .group:hover .group-hover\:bg-slate-50 {
+  background-color: rgba(30, 41, 59, 0.35) !important;
+}
+
+/* --- ADAPTATION DES COULEURS DE MARQUE & BADGES --- */
+
+/* Éléments de thèmes bleus */
+.dark .bg-blue-50,
+.dark .bg-blue-55,
+.dark .bg-blue-105,
+.dark .bg-blue-50\/30,
+.dark .bg-blue-50\/40,
+.dark .bg-blue-50\/50 {
+  background-color: rgba(37, 99, 235, 0.12) !important;
+  color: #60a5fa !important;
+  border-color: rgba(37, 99, 235, 0.25) !important;
+}
+.dark .text-blue-600,
+.dark .text-blue-700,
+.dark .text-blue-800 {
+  color: #60a5fa !important;
+}
+
+/* Éléments de thèmes verts / émeraudes */
+.dark .bg-emerald-50,
+.dark .bg-emerald-50\/30,
+.dark .bg-emerald-50\/40,
+.dark .bg-emerald-50\/50,
+.dark .bg-teal-50,
+.dark .bg-teal-50\/30,
+.dark .bg-teal-50\/40,
+.dark .bg-teal-50\/50 {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  color: #34d399 !important;
+  border-color: rgba(16, 185, 129, 0.25) !important;
+}
+.dark .text-emerald-600,
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-teal-600,
+.dark .text-teal-700,
+.dark .text-teal-800 {
+  color: #34d399 !important;
+}
+
+/* Éléments de thèmes orange / ambre */
+.dark .bg-amber-50,
+.dark .bg-amber-50\/30,
+.dark .bg-amber-50\/40,
+.dark .bg-amber-50\/50 {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+  color: #fbbf24 !important;
+  border-color: rgba(245, 158, 11, 0.25) !important;
+}
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-amber-800 {
+  color: #fbbf24 !important;
+}
+
+/* Éléments de thèmes violets / indigo */
+.dark .bg-indigo-50,
+.dark .bg-indigo-50\/30,
+.dark .bg-indigo-50\/40,
+.dark .bg-indigo-50\/50,
+.dark .bg-purple-50,
+.dark .bg-purple-55,
+.dark .bg-purple-50\/30,
+.dark .bg-purple-50\/40,
+.dark .bg-purple-50\/50 {
+  background-color: rgba(99, 102, 241, 0.12) !important;
+  color: #818cf8 !important;
+  border-color: rgba(99, 102, 241, 0.25) !important;
+}
+.dark .text-indigo-600,
+.dark .text-indigo-700,
+.dark .text-indigo-800,
+.dark .text-purple-600,
+.dark .text-purple-700,
+.dark .text-purple-800 {
+  color: #818cf8 !important;
+}
+
+/* Éléments de thèmes rouges / roses (alertes) */
+.dark .bg-rose-50,
+.dark .bg-rose-50\/30,
+.dark .bg-rose-50\/40,
+.dark .bg-rose-50\/50,
+.dark .bg-red-50,
+.dark .bg-red-55,
+.dark .bg-red-50\/30,
+.dark .bg-red-50\/40,
+.dark .bg-red-50\/50 {
+  background-color: rgba(239, 68, 68, 0.12) !important;
+  color: #f87171 !important;
+  border-color: rgba(239, 68, 68, 0.25) !important;
+}
+.dark .text-rose-600,
+.dark .text-rose-700,
+.dark .text-rose-800,
+.dark .text-red-600,
+.dark .text-red-700,
+.dark .text-red-800 {
+  color: #f87171 !important;
+}
+
+/* Ombres portées */
+.dark .shadow-sm {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.5) !important;
+}
+
+.dark .shadow-md {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.6), 0 2px 4px -2px rgba(0, 0, 0, 0.6) !important;
+}
+
+.dark .shadow-lg {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6) !important;
+}
+
+.dark .shadow-xl {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Dialogues, inputs, sélections et éléments de formulaire */
+.dark input, 
+.dark select, 
+.dark textarea {
+  background-color: #0e1424 !important; /* bg-slate-900 like */
+  color: #f8fafc !important;
+  border-color: #1a2236 !important;
+}
+
+.dark input:focus, 
+.dark select:focus, 
+.dark textarea:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
+  outline: none;
+}
+
+.dark input::placeholder, 
+.dark textarea::placeholder {
+  color: #475569 !important;
+}
+
+/* Modals et Overlays */
+.dark .bg-slate-900\/20,
+.dark .bg-slate-900\/40,
+.dark .bg-slate-900\/50,
+.dark .bg-slate-900\/60 {
+  background-color: rgba(2, 6, 23, 0.7) !important;
+}
+
+/* Badges neutres */
+.dark .bg-slate-100.text-slate-800 {
+  background-color: #1a2236 !important;
+  color: #cbd5e1 !important;
+  border-color: #27314a !important;
+}
+
+/* Boutons secondaires et d'action */
+.dark .btn-secondary,
+.dark .bg-slate-50\/40 {
+  background-color: #1a2236 !important;
+  color: #cbd5e1 !important;
+}
+
+/* Infobulles et graphiques Recharts */
+.dark .recharts-default-tooltip {
+  background-color: #090d16 !important;
+  border-color: #1a2236 !important;
+  color: #f8fafc !important;
+}
+
+.dark .recharts-tooltip-label {
+  color: #cbd5e1 !important;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+  
+  /* Hide all non-printable application elements */
+  .no-print,
+  nav,
+  aside,
+  header,
+  button,
+  .sidebar,
+  .btn,
+  .tabs,
+  .alert,
+  .modal-backdrop,
+  .command-palette {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+  
+  /* Reset layout for print sheet */
+  html, body {
+    background: #fff !important;
+    color: #111827 !important;
+    width: 210mm;
+    height: 297mm;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 11pt !important;
+    line-height: 1.4 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: auto !important;
+  }
+  
+  /* Expand document and remove screen-only styling */
+  .printable-area {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+  
+  /* Avoid breaking pages in important metadata elements */
+  .invoice-header,
+  .invoice-totals,
+  .invoice-signatures,
+  .invoice-item-row {
+    page-break-inside: avoid;
+  }
+  
+  tr {
+    page-break-inside: avoid;
+  }
+}
