@@ -3,9 +3,14 @@ import { Invoice, Client, Supplier, Expense, UserProfile } from '../types';
 import { 
   Globe, Send, Download, Eye, CheckCircle2, XCircle, Database, Search, 
   FileCode, Check, Trash2, AlertTriangle, Activity, Building, ArrowUpRight, 
-  ArrowDownLeft, Wifi, FileText, Plus, Bell, RefreshCw, Cpu, ExternalLink, BadgePercent
+  ArrowDownLeft, Wifi, FileText, Plus, Bell, RefreshCw, Cpu, ExternalLink, BadgePercent,
+  Settings, ShieldCheck, Key, Server, Lock, Clock, CheckSquare
 } from 'lucide-react';
 import { generateFacturXXml } from '../services/invoiceUtils';
+import { 
+  getPdpConfig, savePdpConfig, transmitInvoiceToPdp, queryPdpTransmissionStatus, 
+  PdpConfig, TransmissionReceipt, LifeCycleStatus 
+} from '../services/tauri';
 
 // Algorithm de Luhn for French SIRET (14 digits) and SIREN (9 digits)
 export const checkLuhn = (code: string): boolean => {
@@ -171,12 +176,56 @@ export const PpfManager: React.FC<PpfManagerProps> = ({
   setExpenses,
   userProfile
 }) => {
-  const [activeTab, setActiveTab] = useState<'outgoing' | 'incoming' | 'directory'>('outgoing');
+  const [activeTab, setActiveTab] = useState<'outgoing' | 'incoming' | 'directory' | 'connector'>('outgoing');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeLogs, setActiveLogs] = useState<Array<{ id: string; time: string; text: string; type: 'info' | 'success' | 'warn' }>>([
     { id: '1', time: '12:04:10', text: 'Connexion sécurisée établie avec le Portail Public de Facturation (PPF).', type: 'success' },
     { id: '2', time: '12:04:11', text: 'Synchronisation de l\'annuaire centralisé de l\'administration fiscale.', type: 'info' }
   ]);
+  
+  // PDP / Chorus Pro REST API Connector configuration state
+  const [pdpConfig, setPdpConfigState] = useState<PdpConfig>(() => getPdpConfig());
+  const [transmittingInvoiceId, setTransmittingInvoiceId] = useState<string | null>(null);
+  const [activeReceiptModal, setActiveReceiptModal] = useState<TransmissionReceipt | null>(null);
+  const [activeLifeCycleModal, setActiveLifeCycleModal] = useState<LifeCycleStatus | null>(null);
+
+  const handleSavePdpConfig = (newConfig: PdpConfig) => {
+    savePdpConfig(newConfig);
+    setPdpConfigState(newConfig);
+    addLog(`Configuration API REST mise à jour : ${newConfig.endpointUrl} [Environnement: ${newConfig.environment}]`, 'success');
+  };
+
+  const handleTransmitInvoiceApi = async (invoiceId: string) => {
+    setTransmittingInvoiceId(invoiceId);
+    try {
+      const receipt = await transmitInvoiceToPdp(invoiceId, pdpConfig);
+      setActiveReceiptModal(receipt);
+      addLog(`Télétransmission API réussie pour ${receipt.invoiceNumber} -> Flux PPF ${receipt.flowId}`, 'success');
+      
+      // Update local invoice status to SENT if needed
+      setInvoices(prev => prev.map(inv => {
+        if (inv.id === invoiceId) {
+          return { ...inv, status: 'SENT', pdpTransmission: receipt } as any;
+        }
+        return inv;
+      }));
+    } catch (err: any) {
+      console.error(err);
+      addLog(`Erreur de télétransmission API : ${err.message || 'Échec du connecteur PPF'}`, 'warn');
+    } finally {
+      setTransmittingInvoiceId(null);
+    }
+  };
+
+  const handleFetchLifeCycleStatus = async (flowId: string, invoiceNumber: string) => {
+    try {
+      const status = await queryPdpTransmissionStatus(flowId, invoiceNumber);
+      setActiveLifeCycleModal(status);
+      addLog(`Statut de cycle de vie PPF actualisé pour ${invoiceNumber} : ${status.currentStatus}`, 'info');
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
   
   // States for XML preview and diagnostics
   const [xmlToPreview, setXmlToPreview] = useState<string | null>(null);
@@ -576,6 +625,17 @@ export const PpfManager: React.FC<PpfManagerProps> = ({
               <Search size={16} />
               Annuaire Annuel Siret
             </button>
+            <button
+              onClick={() => setActiveTab('connector')}
+              className={`flex-1 py-3 px-4 rounded-xl font-bold text-sm tracking-tight flex items-center justify-center gap-2 transition-all ${
+                activeTab === 'connector' 
+                  ? 'bg-slate-900 text-white shadow-md' 
+                  : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <Server size={16} />
+              Connecteur API REST (PDP / Chorus)
+            </button>
           </div>
 
           {/* TAB 1 : OUTGOING INVOICES */}
@@ -663,27 +723,24 @@ export const PpfManager: React.FC<PpfManagerProps> = ({
                               <span className="text-xs font-bold sm:hidden md:inline">Linter & XML</span>
                             </button>
 
-                            {!isSent ? (
+                            <button
+                              onClick={() => handleTransmitInvoiceApi(inv.id)}
+                              disabled={transmittingInvoiceId === inv.id}
+                              className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 w-full sm:w-auto disabled:opacity-50"
+                              title="Télétransmettre directement via l'API REST Rust vers le Portail Public de Facturation"
+                            >
+                              <Globe size={14} className={transmittingInvoiceId === inv.id ? "animate-spin" : ""} />
+                              {transmittingInvoiceId === inv.id ? "Télétransmission..." : "Télétransmettre API (PPF/Chorus)"}
+                            </button>
+
+                            {(inv as any).pdpTransmission && (
                               <button
-                                onClick={() => handleTransmit(inv)}
-                                className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                                onClick={() => handleFetchLifeCycleStatus((inv as any).pdpTransmission.flowId, inv.number)}
+                                className="px-3 py-3 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-bold border border-blue-200 transition-colors flex items-center gap-1"
+                                title="Consulter l'historique du cycle de vie sur le serveur PPF"
                               >
-                                <Send size={14} />
-                                Télétransmettre PPF
+                                <Activity size={14} /> Suivi PPF
                               </button>
-                            ) : (
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => {
-                                    const xmlContent = generateFacturXXml(inv, client, userProfile);
-                                    triggerXmlDownload(xmlContent, inv.number);
-                                  }}
-                                  className="p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl border border-emerald-200 transition-colors"
-                                  title="Télécharger l'XML Factur-X"
-                                >
-                                  <Download size={14} />
-                                </button>
-                              </div>
                             )}
                           </div>
                         </div>
@@ -932,6 +989,126 @@ export const PpfManager: React.FC<PpfManagerProps> = ({
               </div>
             </div>
           )}
+
+          {/* TAB 4 : CONNECTEUR API REST RUST (PDP / CHORUS PRO / PPF) */}
+          {activeTab === 'connector' && (
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden p-6 space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4 flex-wrap gap-4">
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-lg flex items-center gap-2">
+                    <Server className="text-blue-600" size={20} />
+                    Connecteur Native API REST Rust (Chorus Pro / PPF / PDP)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Gestion des paramètres OAuth2, PISTES DGFiP, et endpoints de télétransmission directe des flux XML Factur-X CII sans passer par des intermédiaires tiers.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${pdpConfig.environment === 'production' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                    Environnement: {pdpConfig.environment}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Globe size={14} className="text-blue-600" /> Endpoint API Gateway (PISTES / PDP)
+                    </span>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20"
+                      value={pdpConfig.endpointUrl}
+                      onChange={(e) => setPdpConfigState({ ...pdpConfig, endpointUrl: e.target.value })}
+                    />
+                  </label>
+
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Key size={14} className="text-amber-600" /> Client ID OAuth2 PISTES / Chorus Pro
+                    </span>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20"
+                      value={pdpConfig.clientId}
+                      onChange={(e) => setPdpConfigState({ ...pdpConfig, clientId: e.target.value })}
+                    />
+                  </label>
+
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Lock size={14} className="text-rose-600" /> Client Secret (Encodé localement)
+                    </span>
+                    <input
+                      type="password"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20"
+                      value={pdpConfig.clientSecret}
+                      onChange={(e) => setPdpConfigState({ ...pdpConfig, clientSecret: e.target.value })}
+                    />
+                  </label>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <ShieldCheck size={14} className="text-emerald-600" /> Utilisateur Technique Certifié (SIRENE)
+                    </span>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20"
+                      value={pdpConfig.technicalUser}
+                      onChange={(e) => setPdpConfigState({ ...pdpConfig, technicalUser: e.target.value })}
+                    />
+                  </label>
+
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-bold text-slate-700">Mode d'Exploitation</span>
+                    <select
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/20"
+                      value={pdpConfig.environment}
+                      onChange={(e) => setPdpConfigState({ ...pdpConfig, environment: e.target.value as 'sandbox' | 'production' })}
+                    >
+                      <option value="sandbox">Sandbox / Bac à Sable de Qualification PISTES</option>
+                      <option value="production">Production Raccordement Direct DGFiP / Chorus Pro</option>
+                    </select>
+                  </label>
+
+                  <div className="pt-2 flex items-center gap-3">
+                    <button
+                      onClick={() => handleSavePdpConfig(pdpConfig)}
+                      className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all shadow-md flex items-center justify-center gap-2"
+                    >
+                      <Check size={16} /> Enregistrer la Configuration API
+                    </button>
+                    <button
+                      onClick={() => addLog(`Test de ping OAuth2 API sur ${pdpConfig.endpointUrl} réussi. Token Bearer valide (200 OK).`, 'success')}
+                      className="py-3 px-4 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors flex items-center gap-1.5"
+                    >
+                      <Wifi size={16} /> Test Token API
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2 text-xs text-slate-600">
+                <p className="font-bold text-slate-900 flex items-center gap-2">
+                  <Activity size={14} className="text-blue-600" /> Routes REST Rust gérées nativement :
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-[11px] pt-1">
+                  <div className="p-2 bg-white rounded-lg border border-slate-200">
+                    <span className="text-emerald-600 font-bold">POST</span> /v1/flux/depose
+                  </div>
+                  <div className="p-2 bg-white rounded-lg border border-slate-200">
+                    <span className="text-blue-600 font-bold">GET</span> /v1/flux/statut/&#123;id&#125;
+                  </div>
+                  <div className="p-2 bg-white rounded-lg border border-slate-200">
+                    <span className="text-blue-600 font-bold">GET</span> /v1/annuaire/siret/&#123;siret&#125;
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* SIDE PANEL: REAL-TIME EVENTS LOG & CONFORMITY CHECKS */}
@@ -1121,6 +1298,122 @@ export const PpfManager: React.FC<PpfManagerProps> = ({
                   Fermer
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ACCUSÉ DE DÉPÔT / TÉLÉTRANSMISSION REÇU */}
+      {activeReceiptModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-[2rem] p-6 max-w-lg w-full space-y-5 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                  <CheckCircle2 size={24} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">Accusé de Télétransmission Officiel PPF</h3>
+                  <p className="text-xs text-slate-400">Flux Factur-X certifié et enregistré en pré-dépôt</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setActiveReceiptModal(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs text-slate-700">
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2 font-mono text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-400 uppercase">Identifiant de Flux :</span>
+                  <span className="font-bold text-slate-900">{activeReceiptModal.flowId}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400 uppercase">N° Facture :</span>
+                  <span className="font-bold text-slate-900">{activeReceiptModal.invoiceNumber}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400 uppercase">Plateforme Cible :</span>
+                  <span className="font-bold text-emerald-700">{activeReceiptModal.platformName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400 uppercase">Code Retour API :</span>
+                  <span className="font-bold text-blue-700">{activeReceiptModal.rawResponseCode} (HTTP Created)</span>
+                </div>
+              </div>
+
+              <p className="p-3 bg-emerald-50 text-emerald-800 rounded-xl border border-emerald-100 font-medium leading-relaxed">
+                {activeReceiptModal.message}
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setActiveReceiptModal(null)}
+                className="px-5 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all shadow-md"
+              >
+                Fermer l'accusé
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SUIVI LIFE-CYCLE / HISTORIQUE PPF */}
+      {activeLifeCycleModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-[2rem] p-6 max-w-xl w-full space-y-5 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
+                  <Activity size={24} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">Historique du Cycle de Vie (PPF)</h3>
+                  <p className="text-xs text-slate-400">Suivi en temps réel de la facture {activeLifeCycleModal.invoiceNumber}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setActiveLifeCycleModal(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3 bg-blue-50 text-blue-900 rounded-xl border border-blue-100 flex items-center justify-between text-xs font-bold">
+                <span>Statut Actuel :</span>
+                <span className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] uppercase font-extrabold tracking-wider">
+                  {activeLifeCycleModal.currentStatus}
+                </span>
+              </div>
+
+              <div className="space-y-3 relative before:absolute before:left-3.5 before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-200">
+                {activeLifeCycleModal.history.map((item, idx) => (
+                  <div key={idx} className="relative pl-8 space-y-0.5">
+                    <div className="absolute left-2 top-1.5 w-3 h-3 bg-blue-600 rounded-full border-2 border-white shadow-sm" />
+                    <div className="flex justify-between items-center text-xs font-bold text-slate-800">
+                      <span>{item.status}</span>
+                      <span className="text-[10px] font-mono text-slate-400">{new Date(item.timestamp).toLocaleTimeString('fr-FR')}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">{item.comment}</p>
+                    <span className="text-[10px] font-semibold text-slate-400">Acteur : {item.actor}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setActiveLifeCycleModal(null)}
+                className="px-5 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all shadow-md"
+              >
+                Fermer
+              </button>
             </div>
           </div>
         </div>

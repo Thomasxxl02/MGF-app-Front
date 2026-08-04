@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Client, Invoice, InvoiceStatus } from '../types';
-import { Plus, Search, Trash2, Mail, MapPin, Phone, Users, X, Edit2, TrendingUp, FileText, Download, SortAsc, Calendar, StickyNote, Archive, RefreshCcw, Globe, Building, CreditCard, User } from 'lucide-react';
+import { Plus, Search, Trash2, Mail, MapPin, Phone, Users, X, Edit2, TrendingUp, FileText, Download, SortAsc, Calendar, StickyNote, Archive, RefreshCcw, Globe, Building, CreditCard, User, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { validateSiretLuhn, deriveFrenchVatFromSiren, validateViesVatFormat } from '../services/vatSiretService';
 
 interface ClientManagerProps {
   clients: Client[];
@@ -297,24 +298,71 @@ const ClientManager: React.FC<ClientManagerProps> = ({ clients, setClients, invo
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1.5">SIRET</label>
+                        <div className="flex justify-between items-center mb-1.5">
+                            <label className="block text-sm font-semibold text-slate-700">SIRET / SIREN</label>
+                            {formData.siret && (
+                              <span className={`text-[10px] font-bold flex items-center gap-1 ${
+                                validateSiretLuhn(formData.siret).valid ? 'text-emerald-600' : 'text-amber-600'
+                              }`}>
+                                {validateSiretLuhn(formData.siret).valid ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+                                {validateSiretLuhn(formData.siret).valid ? 'Luhn OK' : 'Invalide'}
+                              </span>
+                            )}
+                        </div>
                         <input 
                             type="text" 
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                            value={formData.siret}
-                            onChange={e => setFormData({...formData, siret: e.target.value})}
-                            placeholder="14 chiffres"
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono text-xs"
+                            value={formData.siret || ''}
+                            onChange={e => {
+                              const val = e.target.value;
+                              const updated = { ...formData, siret: val };
+                              // Auto calculate FR VAT if valid SIREN/SIRET and tvaNumber empty
+                              const siretCheck = validateSiretLuhn(val);
+                              if (siretCheck.valid && !formData.tvaNumber) {
+                                const derivedVat = deriveFrenchVatFromSiren(val);
+                                if (derivedVat) updated.tvaNumber = derivedVat;
+                              }
+                              setFormData(updated);
+                            }}
+                            placeholder="14 chiffres (ex: 80000000000012)"
                         />
+                        {formData.siret && (
+                          <p className="text-[10px] text-slate-400 mt-1">
+                            {validateSiretLuhn(formData.siret).message}
+                          </p>
+                        )}
                     </div>
                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1.5">Numéro de TVA</label>
+                        <div className="flex justify-between items-center mb-1.5">
+                            <label className="block text-sm font-semibold text-slate-700">N° TVA Intracommunautaire</label>
+                            {formData.tvaNumber && (
+                              <span className={`text-[10px] font-bold flex items-center gap-1 ${
+                                validateViesVatFormat(formData.tvaNumber).valid ? 'text-emerald-600' : 'text-amber-600'
+                              }`}>
+                                {validateViesVatFormat(formData.tvaNumber).valid ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+                                {validateViesVatFormat(formData.tvaNumber).valid ? 'Format VIES' : 'Format'}
+                              </span>
+                            )}
+                        </div>
                         <input 
                             type="text" 
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono text-xs"
                             value={formData.tvaNumber || ''}
-                            onChange={e => setFormData({...formData, tvaNumber: e.target.value})}
+                            onChange={e => setFormData({...formData, tvaNumber: e.target.value.toUpperCase()})}
                             placeholder="FRXX999999999"
                         />
+                        {formData.siret && validateSiretLuhn(formData.siret).valid && !formData.tvaNumber && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const derived = deriveFrenchVatFromSiren(formData.siret || '');
+                              if (derived) setFormData({ ...formData, tvaNumber: derived });
+                            }}
+                            className="text-[10px] text-blue-600 hover:underline flex items-center gap-1 mt-1 font-semibold"
+                          >
+                            <Sparkles size={10} /> Auto-générer TVA depuis SIRET
+                          </button>
+                        )}
                     </div>
                 </div>
 

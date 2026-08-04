@@ -117,12 +117,22 @@ export interface Invoice {
   hideVatColumn?: boolean; // Option pour masquer s'il y a lieu la colonne TVA sur le tableau de la pièce
   customBannerStyle?: 'gradient' | 'minimal' | 'bordered'; // Style d'en-tête de page pour le document
   customVatReason?: string; // Clause d'exonération prédéfinie ou taux dérogatoire spécifique
+  auditHash?: string; // Empreinte cryptographique SHA-256 (Inviolabilité fiscale & Piste d'audit fiable)
+  previousAuditHash?: string; // Chaînage cryptographique avec le document précédent
   recurrence?: {
     frequency: 'monthly' | 'quarterly' | 'yearly';
     nextDate: string;
     active: boolean;
     lastGenerated?: string;
   };
+  dunningHistory?: Array<{
+    id: string;
+    date: string;
+    level: 'courtois' | 'ferme' | 'mise_en_demeure';
+    penaltyAmount: number;
+    recoveryFeeApplied: boolean;
+    notes?: string;
+  }>;
 }
 
 export interface UserProfile {

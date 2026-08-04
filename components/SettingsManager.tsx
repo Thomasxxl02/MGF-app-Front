@@ -5,11 +5,10 @@ import {
   CreditCard, ShieldCheck, Download, Upload, RefreshCw, Trash2, 
   Percent, Coins, HelpCircle, Sparkles, Sliders, AlertTriangle, Database,
   Cpu, Shield, Key, FileCode, Palette, ShieldAlert, BadgeCheck, Sparkle, Eye, EyeOff, ShieldCheck as BadgeCheck2, FileCheck, Check, Lightbulb, Play,
-  Laptop, Clock, Maximize2, Minimize2, Building2
+  Laptop, Clock, Maximize2, Minimize2, Building2, Printer, Copy, PlusCircle, RotateCcw, Edit3, Scale, BookOpen, Info, XCircle, FileText, FilePlus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
+import { RichTextEditor } from './RichTextEditor';
 import { CompanyManager } from './CompanyManager';
 import { TestDashboard } from './TestDashboard';
 import { Gauge } from 'lucide-react';
@@ -60,6 +59,228 @@ const SettingsManager: React.FC<SettingsManagerProps> = ({
 
   // État et gestion du mode plein écran (Fullscreen API)
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  // États et gestion de l'onglet CGV
+  const [cgvViewMode, setCgvViewMode] = useState<'edit' | 'preview'>('edit');
+  const [cgvCopySuccess, setCgvCopySuccess] = useState<boolean>(false);
+  const [showCgvTemplateModal, setShowCgvTemplateModal] = useState<boolean>(false);
+  const [showCgvPrintModal, setShowCgvPrintModal] = useState<boolean>(false);
+  const [selectedCgvTemplateId, setSelectedCgvTemplateId] = useState<string>('service_b2b');
+
+  // Remplace les balises de variables {RAISON_SOCIALE}, {SIRET}... par les vraies valeurs du profil
+  const getSubstitutedCgvText = (rawText: string) => {
+    let result = rawText || '';
+    const companyName = userProfile.companyName || 'Votre Entreprise';
+    const siret = userProfile.siret || '000 000 000 00000';
+    const paymentDelay = userProfile.paymentDelayDays !== undefined ? `${userProfile.paymentDelayDays} jours` : '30 jours';
+    const tribunal = userProfile.rcsRegistry ? `Tribunal de Commerce de ${userProfile.rcsRegistry}` : 'Tribunal de Commerce du siège social';
+    const email = userProfile.email || 'contact@entreprise.fr';
+    const vatMention = userProfile.vatFranchiseArt293B ? 'TVA non applicable, art. 293 B du CGI' : (userProfile.tvaNumber ? `N° TVA Intracommunautaire : ${userProfile.tvaNumber}` : 'TVA au taux légal en vigueur');
+
+    return result
+      .replace(/{RAISON_SOCIALE}/g, companyName)
+      .replace(/{SIRET}/g, siret)
+      .replace(/{DELAI_PAIEMENT}/g, paymentDelay)
+      .replace(/{TRIBUNAL_COMPETENT}/g, tribunal)
+      .replace(/{EMAIL}/g, email)
+      .replace(/{MENTION_TVA}/g, vatMention);
+  };
+
+  const handleSubstituteCgvVariablesInProfile = () => {
+    const currentCgv = userProfile.cgv || '';
+    const updated = getSubstitutedCgvText(currentCgv);
+    handleChange('cgv', updated);
+    triggerFeedback("Toutes les balises de variables ont été remplacées par les vraies coordonnées de votre profil !");
+  };
+
+  const handleCopyCgvText = () => {
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = getSubstitutedCgvText(userProfile.cgv || '');
+    const plainText = tempDiv.innerText || tempDiv.textContent || '';
+    navigator.clipboard.writeText(plainText);
+    setCgvCopySuccess(true);
+    triggerFeedback("Texte brut des CGV copié dans le presse-papier !");
+    setTimeout(() => setCgvCopySuccess(false), 3000);
+  };
+
+  const getCgvComplianceCheck = (cgvText: string) => {
+    const text = (cgvText || '').toLowerCase();
+    
+    const checks = [
+      {
+        id: 'identity',
+        label: 'Identification légale (SIRET / Raison Sociale)',
+        passed: text.includes('siret') || text.includes('raison sociale') || text.includes('entreprise') || text.includes('société') || text.includes('societe'),
+        fixSnippet: '<h2>ARTICLE – IDENTIFICATION</h2><p>Les présentes CGV sont applicables aux ventes conclues par <strong>{RAISON_SOCIALE}</strong>, enregistrée sous le SIRET : {SIRET}.</p>'
+      },
+      {
+        id: 'payment_delay',
+        label: 'Délais de règlement & Échéances',
+        passed: text.includes('délai') || text.includes('delai') || text.includes('échéance') || text.includes('echeance') || text.includes('règlement') || text.includes('reglement') || text.includes('comptant') || text.includes('réception'),
+        fixSnippet: '<h2>ARTICLE – DÉLAIS DE PAIEMENT</h2><p>Les factures sont exigibles dans un délai de <strong>{DELAI_PAIEMENT}</strong> à compter de la date d’émission.</p>'
+      },
+      {
+        id: 'penalties',
+        label: 'Pénalités de retard (Taux légal BCE)',
+        passed: text.includes('pénalité') || text.includes('penalite') || text.includes('taux légal') || text.includes('taux legal') || text.includes('intérêts de retard'),
+        fixSnippet: '<p><strong>Pénalités de retard :</strong> Tout retard de paiement entraîne de plein droit l’application de pénalités de retard au taux annuel égal à 3 fois le taux d’intérêt légal.</p>'
+      },
+      {
+        id: 'recovery_fee',
+        label: 'Indemnité forfaitaire de recouvrement (40 € - Art. D. 441-5)',
+        passed: text.includes('40') && (text.includes('recouvrement') || text.includes('forfaitaire')),
+        fixSnippet: '<p><strong>Frais de recouvrement :</strong> Une indemnité forfaitaire pour frais de recouvrement de <strong>40 €</strong> sera due par le client professionnel en cas de retard de paiement (Art. D. 441-5 du Code de commerce).</p>'
+      },
+      {
+        id: 'discount',
+        label: 'Mention d’Escompte pour paiement anticipé',
+        passed: text.includes('escompte'),
+        fixSnippet: '<p><strong>Escompte :</strong> Aucun escompte n’est accordé en cas de paiement anticipé.</p>'
+      },
+      {
+        id: 'jurisdiction',
+        label: 'Attribution de juridiction & Droit applicable',
+        passed: text.includes('tribunal') || text.includes('juridiction') || text.includes('litige') || text.includes('droit français'),
+        fixSnippet: '<h2>ARTICLE – JURIDICTION</h2><p>Tout différend sera soumis au droit français et porté devant le <strong>{TRIBUNAL_COMPETENT}</strong>.</p>'
+      }
+    ];
+
+    const passedCount = checks.filter(c => c.passed).length;
+    const scorePercentage = Math.round((passedCount / checks.length) * 100);
+
+    return {
+      checks,
+      passedCount,
+      totalCount: checks.length,
+      scorePercentage
+    };
+  };
+
+  const cgvTemplatesList = [
+    {
+      id: 'service_b2b',
+      title: '💼 Prestations de Services B2B',
+      subtitle: 'Idéal Freelances, Consultants, Agences, IT & Conseil',
+      badge: 'Recommandé B2B',
+      badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
+      content: `<h2>ARTICLE 1 – CHAMP D'APPLICATION ET OPPOSABILITÉ</h2>
+<p>Les présentes Conditions Générales de Vente (CGV) constituent le socle unique de la relation commerciale entre <strong>{RAISON_SOCIALE}</strong> (SIRET : {SIRET}) et ses clients professionnels. Elles s'appliquent sans restriction à toutes les prestations de services commandées.</p>
+
+<h2>ARTICLE 2 – COMMANDES ET DEVIS</h2>
+<p>Chaque prestation fait l'objet d'un devis préalable précisant la nature, la durée et le tarif des travaux. La commande est ferme dès réception du devis daté, signé et revêtu de la mention manuscrite « Bon pour accord ».</p>
+
+<h2>ARTICLE 3 – TARIFS ET FRANCHISE DE TVA</h2>
+<p>Les prix sont exprimés en Euros (€) et sont garantis pendant la durée de validité du devis. {MENTION_TVA}</p>
+
+<h2>ARTICLE 4 – CONDITIONS ET DÉLAIS DE PAIEMENT</h2>
+<p>Les factures sont payables dans un délai de <strong>{DELAI_PAIEMENT}</strong> à compter de leur date d'émission.</p>
+<p><strong>Pénalités de retard :</strong> Tout retard de paiement donnera lieu de plein droit et sans mise en demeure préalable à l'application de pénalités de retard calculées au taux de 3 fois le taux d'intérêt légal en vigueur.</p>
+<p><strong>Indemnité forfaitaire de recouvrement :</strong> Conformément aux articles L. 441-10 et D. 441-5 du Code de commerce, une indemnité forfaitaire pour frais de recouvrement d'un montant de <strong>40 €</strong> sera automatiquement due pour tout retard de règlement.</p>
+<p><strong>Escompte :</strong> Aucun escompte n'est accordé en cas de paiement anticipé.</p>
+
+<h2>ARTICLE 5 – PROPRIÉTÉ INTELLECTUELLE</h2>
+<p>Les livrables et créations demeurent la propriété exclusive de <strong>{RAISON_SOCIALE}</strong> jusqu'au paiement intégral du prix convenu. Le transfert des droits d'exploitation ou de reproduction est subordonné à l'encaissement effectif et complet des sommes dues.</p>
+
+<h2>ARTICLE 6 – RESPONSABILITÉ ET FORCE MAJEURE</h2>
+<p>La responsabilité du prestataire est soumise à une obligation de moyens. Elle ne saurait être engagée en cas de force majeure ou de mauvaise utilisation des livrables par le Client.</p>
+
+<h2>ARTICLE 7 – LITIGES ET JURIDICTION</h2>
+<p>Les présentes CGV sont régies par le droit français. À défaut d'accord amiable, tout différend relatif à leur application sera porté devant le <strong>{TRIBUNAL_COMPETENT}</strong>.</p>`
+    },
+    {
+      id: 'products_b2b',
+      title: '📦 Vente de Marchandises & Produits (B2B)',
+      subtitle: 'Pour les grossistes, fabricants, vente de biens matériels & équipements',
+      badge: 'Vente Matérielle',
+      badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      content: `<h2>ARTICLE 1 – DISPOSITIONS GÉNÉRALES</h2>
+<p>Les présentes CGV s'appliquent à l'ensemble des ventes de produits conclues par la société ou entreprise <strong>{RAISON_SOCIALE}</strong> (SIRET : {SIRET}) auprès de tout acheteur professionnel.</p>
+
+<h2>ARTICLE 2 – PRIX ET COMMANDES</h2>
+<p>Les produits sont fournis au prix en vigueur lors de l'enregistrement de la commande. Les offres de prix sont valables dans la limite des stocks disponibles.</p>
+
+<h2>ARTICLE 3 – CLAUSE DE RÉSERVE DE PROPRIÉTÉ</h2>
+<p><strong>{RAISON_SOCIALE}</strong> conserve la propriété absolue des marchandises livrées jusqu'au paiement complet de l'intégralité du prix en principal, intérêts et frais (Loi n° 80-335 du 12 mai 1980).</p>
+
+<h2>ARTICLE 4 – LIVRAISON ET TRANSFERT DES RISQUES</h2>
+<p>La livraison est effectuée à l'adresse indiquée par l'acheteur. Les risques sont transférés à l'acheteur dès la remise des marchandises au transporteur ou au client.</p>
+
+<h2>ARTICLE 5 – PAIEMENT ET RETARD DE RÈGLEMENT</h2>
+<p>Paiement sous <strong>{DELAI_PAIEMENT}</strong>. En cas de retard : pénalités au taux de 3 fois le taux légal + <strong>40 €</strong> d'indemnité forfaitaire de recouvrement (Art. D. 441-5). Pas d'escompte accordé pour paiement anticipé.</p>
+
+<h2>ARTICLE 6 – GARANTIE ET RÉCLAMATIONS</h2>
+<p>Toute réclamation pour vice apparent ou non-conformité de la marchandise doit être transmise par lettre recommandée avec AR dans un délai de 8 jours suivant la réception.</p>
+
+<h2>ARTICLE 7 – TRIBUNAL COMPÉTENT</h2>
+<p>Tout litige relèvera de la compétence exclusive du <strong>{TRIBUNAL_COMPETENT}</strong>.</p>`
+    },
+    {
+      id: 'artisans_works',
+      title: '🛠️ Artisans, Bâtiment & Travaux',
+      subtitle: 'Pour les professionnels du bâtiment, dépannage, travaux et prestations avec fournitures',
+      badge: 'Artisans / Chantier',
+      badgeColor: 'bg-amber-50 text-amber-700 border-amber-200',
+      content: `<h2>ARTICLE 1 – VALIDITÉ DU DEVIS</h2>
+<p>Les prestations et travaux exécutés par <strong>{RAISON_SOCIALE}</strong> (SIRET : {SIRET}) font l'objet d'un devis préalable valable 30 jours à compter de sa date d'émission.</p>
+
+<h2>ARTICLE 2 – ACOMPTE ET DÉROULEMENT DES TRAVAUX</h2>
+<p>Un acompte de 30 % du montant TTC du devis est exigé à la signature. Les travaux débuteront à réception de cet acompte et sous réserve de l'accessibilité des lieux.</p>
+
+<h2>ARTICLE 3 – MODIFICATIONS DE CHANTIER</h2>
+<p>Toute prestation complémentaire non prévue au devis initial fera l'objet d'un avenant écrit d'un commun accord préalable.</p>
+
+<h2>ARTICLE 4 – RÉSERVE DE PROPRIÉTÉ MATÉRIELLE</h2>
+<p>Les matériaux, équipements et fournitures livrés ou posés demeurent la propriété de <strong>{RAISON_SOCIALE}</strong> jusqu'à l'encaissement complet du prix.</p>
+
+<h2>ARTICLE 5 – MODALITÉS DE RÈGLEMENT</h2>
+<p>Solde de facture payable à <strong>{DELAI_PAIEMENT}</strong>. Retard de paiement : pénalités de 3 fois le taux légal + <strong>40 €</strong> de frais de recouvrement. Pas d'escompte pour paiement anticipé.</p>
+
+<h2>ARTICLE 6 – DROIT APPLICABLE</h2>
+<p>Attribution de juridiction au <strong>{TRIBUNAL_COMPETENT}</strong> en cas de litige non résolu à l'amiable.</p>`
+    },
+    {
+      id: 'dev_it_saas',
+      title: '💻 Développement Web, Software & IT',
+      subtitle: 'Pour les développeurs web, créateurs de logiciels, SaaS & intégrateurs',
+      badge: 'Tech & Digital',
+      badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      content: `<h2>ARTICLE 1 – CHAMP D'APPLICATION</h2>
+<p>Les présentes CGV régissent les prestations informatiques et le développement de logiciels sur mesure par <strong>{RAISON_SOCIALE}</strong> (SIRET : {SIRET}).</p>
+
+<h2>ARTICLE 2 – CAHIER DES CHARGES ET RECETTE</h2>
+<p>Les développements sont réalisés conformément au cahier des charges validé. Le Client dispose d'une période de recette de 14 jours pour valider la livraison. Passé ce délai, les livrables sont réputés définitivement acceptés.</p>
+
+<h2>ARTICLE 3 – NIVEAU DE RESPONSABILITÉ</h2>
+<p>Le prestataire s'engage à apporter tout son soin à l'exécution de la mission (obligation de moyens). Sa responsabilité est plafonnée au montant global de la prestation.</p>
+
+<h2>ARTICLE 4 – DROITS D'AUTEUR ET CODE SOURCE</h2>
+<p>La cession des droits d'utilisation ou d'exploitation du code source n'intervient qu'après paiement intégral de l'ensemble des factures associées à la prestation.</p>
+
+<h2>ARTICLE 5 – MODALITÉS DE PAIEMENT</h2>
+<p>Paiement exigible sous <strong>{DELAI_PAIEMENT}</strong>. Tout retard entraîne l'exigibilité de pénalités de 3 fois le taux légal et d'une indemnité forfaitaire pour frais de recouvrement de <strong>40 €</strong>. Aucun escompte.</p>
+
+<h2>ARTICLE 6 – TRIBUNAL COMPÉTENT</h2>
+<p>Attribution exclusive de compétence au <strong>{TRIBUNAL_COMPETENT}</strong>.</p>`
+    },
+    {
+      id: 'micro_simplified',
+      title: '⚡ CGV Micro-Entreprise Simplifiées (Art. 293 B)',
+      subtitle: 'Format concis pour micro-entrepreneurs avec clause d\'exonération de TVA',
+      badge: 'Micro-Entreprise',
+      badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
+      content: `<h2>ARTICLE 1 – APPLICATION</h2>
+<p>Les présentes CGV s'appliquent à l'ensemble des ventes et services fournis par l'entreprise individuelle <strong>{RAISON_SOCIALE}</strong> (SIRET : {SIRET}).</p>
+
+<h2>ARTICLE 2 – FRANCHISE DE TVA</h2>
+<p>TVA non applicable, art. 293 B du Code Général des Impôts (CGI). Les montants facturés sont nets.</p>
+
+<h2>ARTICLE 3 – DELAIS ET CONDITION DE PAIEMENT</h2>
+<p>Factures payables à <strong>{DELAI_PAIEMENT}</strong> après émission. Tout retard donne lieu de plein droit à des pénalités au taux de 3 fois le taux d'intérêt légal et à une indemnité forfaitaire pour frais de recouvrement de <strong>40 €</strong> (Art. D. 441-5 du Code de commerce). Aucun escompte pour paiement anticipé.</p>
+
+<h2>ARTICLE 4 – RÉCLAMATIONS ET LITIGES</h2>
+<p>Toute réclamation doit être notifiée par email à {EMAIL} sous 8 jours. Litiges soumis au droit français et au <strong>{TRIBUNAL_COMPETENT}</strong>.</p>`
+    }
+  ];
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -2987,33 +3208,428 @@ const SettingsManager: React.FC<SettingsManagerProps> = ({
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.2 }}
-                className="space-y-6"
+                className="space-y-8"
               >
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2 mb-2">
-                    <FileCheck className={tc.textAccent} size={20} />
-                    Conditions Générales de Vente (CGV)
-                  </h3>
-                  <p className="text-sm text-slate-400">
-                    Définissez vos conditions générales de vente qui seront automatiquement incluses dans vos documents.
-                  </p>
-                </div>
-                
-                <div className="grid grid-cols-1 gap-6">
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Contenu des CGV</label>
-                    <ReactQuill 
-                      theme="snow"
-                      value={userProfile.cgv || ''}
-                      onChange={(value) => {
-                        handleChange('cgv', value);
-                      }}
-                      placeholder="Saisissez ici vos conditions générales de vente..."
-                      className="h-80 mb-12"
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1.5">Ces conditions seront appliquées à tous vos documents commerciaux.</p>
+                {/* Header & Main Control Toolbar */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+                        Code de Commerce & Conformité 2026
+                      </span>
+                    </div>
+                    <h3 className="text-2xl font-black text-slate-900 flex items-center gap-2.5">
+                      <FileCheck className={tc.textAccent} size={24} />
+                      Conditions Générales de Vente (CGV)
+                    </h3>
+                    <p className="text-sm text-slate-500 mt-1 max-w-2xl">
+                      Rédigez, personnalisez et contrôlez la conformité juridique de vos CGV applicables à l'ensemble de vos devis, factures et contrats commerciaux.
+                    </p>
+                  </div>
+
+                  {/* Right Action buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setCgvViewMode(cgvViewMode === 'edit' ? 'preview' : 'edit')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+                        cgvViewMode === 'preview'
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      {cgvViewMode === 'edit' ? <Eye size={15} /> : <Edit3 size={15} />}
+                      <span>{cgvViewMode === 'edit' ? 'Aperçu Document' : 'Mode Éditeur'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowCgvTemplateModal(true)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/60 hover:bg-indigo-100 flex items-center gap-1.5 transition-all"
+                    >
+                      <BookOpen size={15} />
+                      <span>Modèles de CGV</span>
+                    </button>
+
+                    <button
+                      onClick={handleCopyCgvText}
+                      className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-1.5 transition-all"
+                      title="Copier le texte brut"
+                    >
+                      {cgvCopySuccess ? <Check size={15} className="text-emerald-600" /> : <Copy size={15} />}
+                      <span>{cgvCopySuccess ? 'Copié !' : 'Copier'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowCgvPrintModal(true)}
+                      className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-1.5 transition-all"
+                      title="Imprimer / Télécharger PDF"
+                    >
+                      <Printer size={15} />
+                      <span>Imprimer</span>
+                    </button>
                   </div>
                 </div>
+
+                {/* Audit & Audit Bar (Audit de conformité juridique) */}
+                {(() => {
+                  const compliance = getCgvComplianceCheck(userProfile.cgv || '');
+                  return (
+                    <div className="bg-slate-50/80 rounded-2xl p-5 border border-slate-200/80 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-white shadow-sm ${
+                            compliance.scorePercentage === 100 ? 'bg-emerald-600' :
+                            compliance.scorePercentage >= 60 ? 'bg-amber-500' : 'bg-rose-500'
+                          }`}>
+                            {compliance.scorePercentage}%
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                              <span>Conformité des Mentions Légales</span>
+                              <span className="text-xs font-normal text-slate-500">({compliance.passedCount}/{compliance.totalCount} mentions détectées)</span>
+                            </h4>
+                            <p className="text-xs text-slate-500">
+                              {compliance.scorePercentage === 100
+                                ? 'Félicitations ! Vos CGV comportent toutes les clauses obligatoires selon le Code de commerce.'
+                                : 'Certaines mentions clés recommandées sont absentes de votre texte. Cliquez pour les insérer automatiquement.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {compliance.scorePercentage < 100 && (
+                          <button
+                            onClick={handleSubstituteCgvVariablesInProfile}
+                            className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 transition-all flex items-center gap-1.5 self-start sm:self-center"
+                          >
+                            <Sparkles size={13} />
+                            <span>Injecter mes variables</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Checklist badges Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-2 border-t border-slate-200/60">
+                        {compliance.checks.map((check) => (
+                          <div
+                            key={check.id}
+                            className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 transition-all ${
+                              check.passed
+                                ? 'bg-emerald-50/60 border-emerald-200/60 text-emerald-900'
+                                : 'bg-amber-50/60 border-amber-200/80 text-amber-900'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              {check.passed ? (
+                                <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                              ) : (
+                                <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                              )}
+                              <span className="font-semibold truncate">{check.label}</span>
+                            </div>
+                            
+                            {!check.passed && (
+                              <button
+                                onClick={() => {
+                                  const current = userProfile.cgv || '';
+                                  handleChange('cgv', current + '\n' + check.fixSnippet);
+                                  triggerFeedback(`Clause "${check.label}" ajoutée au texte !`);
+                                }}
+                                className="px-2 py-1 bg-amber-600 text-white text-[10px] font-bold rounded hover:bg-amber-700 transition-all shrink-0"
+                              >
+                                + Insérer
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Insertion rapide de balises de variables */}
+                {cgvViewMode === 'edit' && (
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                        <PlusCircle size={14} className="text-blue-600" />
+                        Variables dynamiques à insérer dans le texte :
+                      </span>
+                      <button
+                        onClick={handleSubstituteCgvVariablesInProfile}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-800 underline flex items-center gap-1"
+                      >
+                        <RefreshCw size={12} />
+                        Remplacer toutes les balises par mes vraies données
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {[
+                        { label: '{RAISON_SOCIALE}', desc: userProfile.companyName || 'Nom entreprise' },
+                        { label: '{SIRET}', desc: userProfile.siret || 'SIRET' },
+                        { label: '{DELAI_PAIEMENT}', desc: userProfile.paymentDelayDays !== undefined ? `${userProfile.paymentDelayDays} jours` : '30 jours' },
+                        { label: '{TRIBUNAL_COMPETENT}', desc: userProfile.rcsRegistry || 'Greffe' },
+                        { label: '{EMAIL}', desc: userProfile.email || 'Email' },
+                        { label: '{MENTION_TVA}', desc: 'Mention TVA / Exonération' }
+                      ].map((v) => (
+                        <button
+                          key={v.label}
+                          onClick={() => {
+                            const current = userProfile.cgv || '';
+                            handleChange('cgv', current + ` ${v.label} `);
+                            triggerFeedback(`Balise ${v.label} insérée dans l'éditeur`);
+                          }}
+                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80 rounded-lg text-xs font-mono font-medium flex items-center gap-1.5 transition-all"
+                          title={`Insérer la balise ${v.label}`}
+                        >
+                          <span className="text-blue-600 font-bold">{v.label}</span>
+                          <span className="text-[10px] text-slate-400 font-sans">({v.desc})</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Main View: Editor vs Document Preview */}
+                {cgvViewMode === 'edit' ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider">
+                        Contenu HTML / WYSIWYG des CGV
+                      </label>
+                      <span className="text-xs text-slate-400">
+                        Formaté avec titres H2, paragraphes et puces
+                      </span>
+                    </div>
+
+                    <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
+                      <RichTextEditor 
+                        value={userProfile.cgv || ''}
+                        onChange={(value) => handleChange('cgv', value)}
+                        placeholder="Rédigez ou collez ici vos conditions générales de vente..."
+                        className="w-full"
+                      />
+                    </div>
+                    
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5 pt-2">
+                      <Info size={14} className="text-blue-500 shrink-0" />
+                      Ces conditions seront automatiquement intégrées dans vos devis et factures ou jointes en annexe de vos documents PDF.
+                    </p>
+                  </div>
+                ) : (
+                  /* Mode Prévisualisation Document Impressif */
+                  <div className="bg-white rounded-3xl border border-slate-200 shadow-xl p-8 md:p-12 space-y-8 max-w-4xl mx-auto">
+                    {/* Header Document Preview */}
+                    <div className="border-b-2 border-slate-900 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-14 h-14 bg-gradient-to-tr from-slate-900 to-slate-700 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-lg">
+                          {userProfile.companyName ? userProfile.companyName.charAt(0) : 'E'}
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-extrabold text-slate-900">
+                            {userProfile.companyName || 'Nom de votre Entreprise'}
+                          </h2>
+                          <p className="text-xs text-slate-500 font-mono">
+                            SIRET : {userProfile.siret || '000 000 000 00000'} • {userProfile.address || 'Adresse du siège'}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {userProfile.email} {userProfile.phone ? `• ${userProfile.phone}` : ''}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-left md:text-right bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Document Annexe</span>
+                        <h3 className="text-base font-black text-slate-900">CONDITIONS GÉNÉRALES DE VENTE</h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Mise à jour : {new Date().toLocaleDateString('fr-FR')}</p>
+                      </div>
+                    </div>
+
+                    {/* Formatted CGV Content */}
+                    <div className="prose prose-slate max-w-none text-slate-700 text-xs sm:text-sm leading-relaxed space-y-4 font-sans">
+                      {userProfile.cgv ? (
+                        <div 
+                          dangerouslySetInnerHTML={{ __html: getSubstitutedCgvText(userProfile.cgv) }} 
+                          className="cgv-formatted-preview"
+                        />
+                      ) : (
+                        <div className="py-12 text-center text-slate-400 italic bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                          Aucune condition générale de vente saisie pour le moment.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Signature block */}
+                    <div className="pt-8 border-t border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-8 text-xs">
+                      <div className="space-y-2">
+                        <span className="font-bold text-slate-900">Pour l'Émetteur ({userProfile.companyName || 'L\'entreprise'})</span>
+                        <p className="text-slate-500 text-[11px]">Cachet et signature du représentant légal</p>
+                        <div className="h-20 border border-slate-200 rounded-xl bg-slate-50/50 flex items-center justify-center text-slate-300 italic text-[11px]">
+                          Signature de l'entreprise
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <span className="font-bold text-slate-900">Pour le Client (Bon pour accord & acceptation des CGV)</span>
+                        <p className="text-slate-500 text-[11px]">Nom, fonction, date et signature manuscrite</p>
+                        <div className="h-20 border border-slate-200 rounded-xl bg-slate-50/50 flex items-center justify-center text-slate-300 italic text-[11px]">
+                          Mention manuscrite « Lu et approuvé »
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* MODAL: Modèles de CGV */}
+                <AnimatePresence>
+                  {showCgvTemplateModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-slate-100"
+                      >
+                        {/* Modal Header */}
+                        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                              <BookOpen size={20} />
+                            </div>
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-900">Bibliothèque de Modèles CGV Types</h3>
+                              <p className="text-xs text-slate-500">Sélectionnez un modèle juridique conforme au droit français adapté à votre activité.</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setShowCgvTemplateModal(false)}
+                            className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-200/50"
+                          >
+                            <XCircle size={20} />
+                          </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 overflow-y-auto space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {cgvTemplatesList.map((tpl) => (
+                              <div
+                                key={tpl.id}
+                                onClick={() => setSelectedCgvTemplateId(tpl.id)}
+                                className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                                  selectedCgvTemplateId === tpl.id
+                                    ? 'border-indigo-600 bg-indigo-50/30 shadow-md'
+                                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${tpl.badgeColor}`}>
+                                      {tpl.badge}
+                                    </span>
+                                    {selectedCgvTemplateId === tpl.id && (
+                                      <CheckCircle2 size={18} className="text-indigo-600" />
+                                    )}
+                                  </div>
+                                  <h4 className="font-bold text-slate-900 text-sm mb-1">{tpl.title}</h4>
+                                  <p className="text-xs text-slate-500 leading-relaxed mb-4">{tpl.subtitle}</p>
+                                </div>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const templateContent = getSubstitutedCgvText(tpl.content);
+                                    handleChange('cgv', templateContent);
+                                    setShowCgvTemplateModal(false);
+                                    triggerFeedback(`Modèle "${tpl.title}" chargé avec vos données d'entreprise !`);
+                                  }}
+                                  className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                                    selectedCgvTemplateId === tpl.id
+                                      ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
+                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  <FilePlus size={14} />
+                                  <span>Charger ce modèle</span>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center text-xs text-slate-500">
+                          <span>Ces modèles sont rédigés selon le Code de commerce français (Articles L. 441-10 et D. 441-5).</span>
+                          <button
+                            onClick={() => setShowCgvTemplateModal(false)}
+                            className="px-4 py-2 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300"
+                          >
+                            Fermer
+                          </button>
+                        </div>
+                      </motion.div>
+                    </div>
+                  )}
+                </AnimatePresence>
+
+                {/* MODAL / IMPRESSION CGV */}
+                <AnimatePresence>
+                  {showCgvPrintModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-100 space-y-6"
+                      >
+                        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <Printer className="text-blue-600" size={20} />
+                            Impression & Exportation des CGV
+                          </h3>
+                          <button
+                            onClick={() => setShowCgvPrintModal(false)}
+                            className="p-2 text-slate-400 hover:text-slate-600 rounded-xl"
+                          >
+                            <XCircle size={20} />
+                          </button>
+                        </div>
+
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Vous pouvez lancer l'impression système ou sauvegarder les CGV au format PDF depuis la fenêtre d'impression native du navigateur.
+                        </p>
+
+                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">Résumé du document émis :</h4>
+                          <ul className="text-xs text-slate-600 space-y-1.5 font-mono">
+                            <li>• Émetteur : {userProfile.companyName || 'Non configuré'} (SIRET : {userProfile.siret || '000 000 000 00000'})</li>
+                            <li>• Délai de règlement : {userProfile.paymentDelayDays !== undefined ? `${userProfile.paymentDelayDays} jours` : '30 jours'}</li>
+                            <li>• Régime TVA : {userProfile.vatFranchiseArt293B ? 'Franchise en base (Art. 293 B CGI)' : 'Assujetti TVA'}</li>
+                            <li>• Greffe / Juridiction : {userProfile.rcsRegistry ? `Tribunal de Commerce de ${userProfile.rcsRegistry}` : 'Tribunal compétent par défaut'}</li>
+                          </ul>
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-2">
+                          <button
+                            onClick={() => setShowCgvPrintModal(false)}
+                            className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          >
+                            Annuler
+                          </button>
+                          <button
+                            onClick={() => {
+                              window.print();
+                              setShowCgvPrintModal(false);
+                            }}
+                            className="px-5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 text-white shadow-md hover:bg-blue-700 flex items-center gap-2"
+                          >
+                            <Printer size={16} />
+                            <span>Lancer l'impression / Enregistrer en PDF</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    </div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             )}
           </div>

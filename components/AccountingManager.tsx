@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { analyzeReceiptOCR } from '../services/geminiService';
+import { parseBankCsv, parseBankOfx, reconcileTransaction } from '../services/bankReconciliationService';
 
 interface AccountingManagerProps {
   expenses: Expense[];
@@ -1708,7 +1709,7 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                   <input 
                     type="file" 
                     id="bank-csv-file" 
-                    accept=".csv" 
+                    accept=".csv,.ofx,.qfx" 
                     className="hidden" 
                     onChange={(e) => {
                       const file = e.target.files?.[0];
@@ -1717,41 +1718,17 @@ export const AccountingManager: React.FC<AccountingManagerProps> = ({
                         reader.onload = (event) => {
                           const text = event.target?.result as string;
                           if (!text) return;
-                          const lines = text.split(/\r?\n/);
-                          const parsed: any[] = [];
-                          lines.forEach((line, index) => {
-                            if (index === 0 || !line.trim()) return; // Skip header
-                            const cols = line.indexOf(';') >= 0 ? line.split(';') : line.split(',');
-                            if (cols.length < 2) return;
-                            
-                            const dateStr = cols[0]?.trim() || '';
-                            const description = cols[1]?.trim() || '';
-                            let rawAmount = 0;
-                            if (cols.length >= 4) {
-                              const debit = parseFloat((cols[2] || '').replace(/[\s€]/g, '').replace(',', '.'));
-                              const credit = parseFloat((cols[3] || '').replace(/[\s€]/g, '').replace(',', '.'));
-                              rawAmount = !isNaN(credit) && credit > 0 ? credit : (!isNaN(debit) ? -debit : 0);
-                            } else if (cols[2]) {
-                              rawAmount = parseFloat(cols[2].replace(/[\s€]/g, '').replace(',', '.'));
-                            }
-                            
-                            if (dateStr && description && !isNaN(rawAmount)) {
-                              parsed.push({
-                                id: `imported-${index}-${Date.now()}`,
-                                date: dateStr,
-                                label: description,
-                                amount: rawAmount,
-                                matchedWith: undefined
-                              });
-                            }
-                          });
+                          const fileName = file.name.toLowerCase();
+                          const parsed = (fileName.endsWith('.ofx') || fileName.endsWith('.qfx'))
+                            ? parseBankOfx(text)
+                            : parseBankCsv(text);
                           
                           if (parsed.length > 0) {
                             setBankTransactions(parsed);
                             setMatchingStatusMsg(`Relevé importé avec succès (${parsed.length} lignes trouvées) !`);
                             setTimeout(() => setMatchingStatusMsg(null), 4000);
                           } else {
-                            setMatchingStatusMsg("Erreur: Impossible d'analyser le CSV. Assurez-vous d'avoir les colonnes Date et Libellé.");
+                            setMatchingStatusMsg("Erreur: Impossible d'analyser le relevé. Vérifiez le format (CSV/OFX).");
                             setTimeout(() => setMatchingStatusMsg(null), 5000);
                           }
                         };
